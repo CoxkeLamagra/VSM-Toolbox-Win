@@ -15,11 +15,13 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Frontend regression tests
         run: npm run test:frontend
+      - name: Installer bootstrap checks
+        shell: powershell
+        run: .\tests\installer-bootstrap.ps1
       - name: Install, restart and remove Windows service
         shell: powershell
         run: |
-          $python = (Get-Command python).Source
-          .\scripts\install-windows.ps1 -Python $python
+          .\scripts\install-windows.ps1
           try {
             $health = Invoke-RestMethod http://127.0.0.1:8080/api/health
             if ($health.status -ne 'ok') { throw 'Service health failed' }

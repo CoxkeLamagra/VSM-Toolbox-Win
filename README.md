@@ -43,17 +43,19 @@ Optional browser integration checks run against a temporary database and server,
 
 ## Install on Windows
 
-Supports Windows 10/11 and Windows Server with a machine-wide, 64-bit Python 3.11 or newer installation from python.org (not the Microsoft Store alias or a user-only installation). Python must be readable by Windows LocalService. The web application uses only Python's standard library and local SQLite; the Windows service host uses `pywin32==311`. No external database or container runtime is needed.
+Supports x64 Windows 10/11 and Windows Server. The all-in-one script finds an existing machine-wide Python 3.11–3.13 runtime or installs Python 3.13.14, then installs pip and the Windows service dependencies automatically. You do not need Python, Git, Node, Docker, or a database server installed beforehand. ARM64 Windows is not supported by this installer. The web application uses only Python's standard library and local SQLite; the Windows service host uses `pywin32==311`. No external database or container runtime is needed.
 
 Download/extract this repository to a local directory. In an elevated Windows PowerShell 5.1 or newer, run from that checkout:
 
 ```powershell
-.\scripts\install-windows.ps1 -Python 'C:\Program Files\Python313\python.exe'
+.\scripts\install-windows.ps1
 # To allow other machines on the local subnet (Domain/Private firewall profiles):
-.\scripts\install-windows.ps1 -Python 'C:\Program Files\Python313\python.exe' -AllowPrivateNetwork
+.\scripts\install-windows.ps1 -AllowPrivateNetwork
 ```
 
-Use one of these installation commands, not both. Supply the actual path to your Python executable. Installation needs Internet access to PyPI for pywin32; normal application startup and use work offline. The installer validates the payload, installs the service host dependency, copies the runtime, registers **VSMToolbox** for automatic startup as the built-in **LocalService** account, configures restart recovery, starts it, and checks `/api/health`. It refuses to overwrite an existing installation or service. On failure it retains staged files for diagnosis and does not delete data. Do not point its directories at existing unrelated folders.
+Use one of these installation commands, not both. Download and extract the complete application ZIP first; run the script from that extracted checkout. Approve elevation and use your organization's PowerShell script policy (for example, unblock the reviewed downloaded files with `Unblock-File`). Installation needs HTTPS access to `www.python.org`, `pypi.org`, and `files.pythonhosted.org`; normal application startup and use work offline. The script downloads the official Python installer and requires a valid Windows Authenticode signature from the Python Software Foundation before executing it. Windows may also require access to certificate-revocation services to validate that signature; failed verification stops installation.
+
+When no compatible machine-wide Python is registered, Python is installed under `%ProgramFiles%\VSMToolbox-Python`, without changing PATH, file associations, or the Python launcher. Reruns reuse that dedicated runtime or an existing 64-bit Python registered for all users. Existing machine-wide runtimes are not replaced by the downloaded installer. For an existing machine-wide 64-bit Python 3.11–3.13 installation, use `-Python 'C:\Program Files\Python313\python.exe'`; user-profile, Store, and virtual-environment interpreters are rejected because LocalService must be able to access Python. `-PythonInstallerPath 'C:\Downloads\python-3.13.14-amd64.exe'` can supply a predownloaded official installer (the same signature verification applies); pip still needs PyPI access. It cannot be combined with `-Python`. Python installer failures leave a log at `%TEMP%\VSMToolbox-Python-install.log`. If a restart is requested, restart Windows and rerun the script. The installer validates the payload, installs the service host dependency, copies the runtime, registers **VSMToolbox** for automatic startup as the built-in **LocalService** account, configures restart recovery, starts it, and checks `/api/health`. It refuses to overwrite an existing installation or service. On failure it retains staged files for diagnosis and does not delete data. Do not point its directories at existing unrelated folders.
 
 Open **http://localhost:8080** on the Windows machine, or **http://<server-name-or-IP>:8080** from permitted network clients. The service listens on all IPv4 interfaces on HTTP port 8080. Without `-AllowPrivateNetwork`, the installer does not add a firewall exception. Complete first Admin registration locally before permitting remote clients. HTTP does not encrypt passwords or traffic; restrict access to a trusted network. Secure-cookie mode is disabled for this HTTP deployment.
 
@@ -83,7 +85,7 @@ Uninstall the service and its managed firewall rule from an elevated PowerShell:
 .\scripts\uninstall-windows.ps1
 ```
 
-Uninstallation preserves Python, installed application files, all data, and backups. Remove archived program files manually only after checking your backups. Service failures appear in Windows Event Viewer and the local logs. Check Python availability/permissions and whether another process owns port 8080 if startup fails.
+Uninstallation preserves the dedicated Python runtime, installed application files, all data, and backups. Remove `%ProgramFiles%\VSMToolbox-Python` manually only after uninstalling the service and confirming no other application uses it. Remove archived program files manually only after checking your backups. Service failures appear in Windows Event Viewer and the local logs. Check Python availability/permissions and whether another process owns port 8080 if startup fails.
 
 ## Local accounts and permissions
 
