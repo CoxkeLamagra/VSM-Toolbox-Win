@@ -20,7 +20,7 @@ class DataResetTest(test_updater.UpdaterTest):
     test_check_reports_revision_without_installation = None
 
     def seed_content(self):
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("INSERT INTO steps(id,stream_id,name) VALUES (1,1,'Triage')")
             db.execute("INSERT INTO processes(id,name) VALUES (1,'Incident handling')")
             db.execute('INSERT INTO step_processes VALUES (1,1)')
@@ -49,7 +49,7 @@ class DataResetTest(test_updater.UpdaterTest):
         )
         backup = Path(status['backup'])
         self.assertEqual(updater.validate_backup(backup)['reason'], 'pre-data-clear')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             for table in (
                 'streams',
                 'steps',
@@ -68,7 +68,7 @@ class DataResetTest(test_updater.UpdaterTest):
                 self.assertEqual(
                     db.execute(f'SELECT count(*) FROM {table}').fetchone()[0], 1, table
                 )
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(
                 json.loads(
                     db.execute("SELECT value FROM settings WHERE key='branding'").fetchone()[0]
@@ -80,7 +80,7 @@ class DataResetTest(test_updater.UpdaterTest):
         self.supervisor.maintenance({'action': 'restore', 'id': backup.name})
         self.assertEqual(updater.status()['state'], 'succeeded', updater.status())
         self.assertEqual(self.stream_name(), 'Original service')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM pcf_entries').fetchone()[0], 5)
             self.assertEqual(db.execute('SELECT pcf_id FROM stream_pcf').fetchone()[0], 5)
 
@@ -103,20 +103,20 @@ class DataResetTest(test_updater.UpdaterTest):
         self.assertEqual(updater.status()['state'], 'failed')
         self.assertTrue(self.supervisor.healthy(timeout=10))
         self.assertEqual(self.stream_name(), 'Original service')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM processes').fetchone()[0], 1)
             self.assertEqual(db.execute('SELECT count(*) FROM pcf_entries').fetchone()[0], 5)
 
     def test_delete_transaction_rolls_back_on_failure(self):
         self.seed_content()
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute(
                 "CREATE TRIGGER reject_clear BEFORE DELETE ON processes BEGIN SELECT RAISE(ABORT,'Simulated delete failure'); END"
             )
         with self.assertRaises(sqlite3.IntegrityError):
             updater.clear_business_data(self.db)
         self.assertEqual(self.stream_name(), 'Original service')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM steps').fetchone()[0], 1)
 
 

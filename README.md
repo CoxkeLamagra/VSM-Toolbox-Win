@@ -41,68 +41,49 @@ Visual layout and zoom are saved per account and stream in the current browser. 
 
 Optional browser integration checks run against a temporary database and server, never your existing workspace. With Playwright and its Chromium browser installed in your development environment, run `node tests/diagram.cjs`. `VSM_CHROMIUM` can select an existing Chromium binary, and `PYTHON` can select the Python executable. This checks pan, drag, zoom, fit/reset, keyboard access, process connectors, layout persistence, Viewer restrictions, and touch pinch. Playwright is a development check only; the deployed application still has no third-party runtime dependencies.
 
-## Primary installation: Debian 13 LXC
+## Install on Windows
 
-Create a Debian 13 LXC using your container host's standard template, assign a stable address, and enable networking. No privileged container, Docker nesting, or external database is required. A small container with 1 CPU and 512 MB RAM is a reasonable starting allocation; size storage for your database and backups.
+Supports Windows 10/11 and Windows Server with a machine-wide, 64-bit Python 3.11 or newer installation from python.org (not the Microsoft Store alias or a user-only installation). Python must be readable by Windows LocalService. The web application uses only Python's standard library and local SQLite; the Windows service host uses `pywin32==311`. No external database or container runtime is needed.
 
-The installer installs Python 3, Git, CA certificates, curl, Nginx, OpenSSL, iproute2, and account-management tools; creates an unprivileged `vsm` account; installs the application; enables the systemd service at boot; and waits for a successful API health check. It does not require pip, Docker, or an external database.
+Download/extract this repository to a local directory. In an elevated Windows PowerShell 5.1 or newer, run from that checkout:
 
-Run as root **inside the LXC**. From a checkout containing this installer:
-
-```sh
-bash scripts/install-debian13.sh --source-dir "$PWD"
+```powershell
+.\scripts\install-windows.ps1 -Python 'C:\Program Files\Python313\python.exe'
+# To allow other machines on the local subnet (Domain/Private firewall profiles):
+.\scripts\install-windows.ps1 -Python 'C:\Program Files\Python313\python.exe' -AllowPrivateNetwork
 ```
 
-Alternatively, once the installer is available on GitHub, download it for inspection and then run it:
+Use one of these installation commands, not both. Supply the actual path to your Python executable. Installation needs Internet access to PyPI for pywin32; normal application startup and use work offline. The installer validates the payload, installs the service host dependency, copies the runtime, registers **VSMToolbox** for automatic startup as the built-in **LocalService** account, configures restart recovery, starts it, and checks `/api/health`. It refuses to overwrite an existing installation or service. On failure it retains staged files for diagnosis and does not delete data. Do not point its directories at existing unrelated folders.
 
-```sh
-apt-get update
-apt-get install -y ca-certificates curl
-curl --fail --show-error --location \
-  https://raw.githubusercontent.com/CoxkeLamagra/VSM-Toolbox/main/scripts/install-debian13.sh \
-  --output /root/install-vsm-toolbox.sh
-# Inspect /root/install-vsm-toolbox.sh before running it.
-bash /root/install-vsm-toolbox.sh
-```
+Open **http://localhost:8080** on the Windows machine, or **http://<server-name-or-IP>:8080** from permitted network clients. The service listens on all IPv4 interfaces on HTTP port 8080. Without `-AllowPrivateNetwork`, the installer does not add a firewall exception. Complete first Admin registration locally before permitting remote clients. HTTP does not encrypt passwords or traffic; restrict access to a trusted network. Secure-cookie mode is disabled for this HTTP deployment.
 
-The default downloads `main` from GitHub over verified HTTPS. Use `--ref <tag-or-commit>` to select a reviewed version **that contains the application and service files**. This installer requires a revision containing `updater.py`, `update-manifest.json`, `scripts/prepare-https.py`, and `vsm/runtime.py`; the older `v0.1.0` tag predates this update protocol and requires its original installer instructions. `--source-dir` and `--ref` cannot be combined. Internet access to Debian package mirrors and, unless using local source, GitHub is required. Run `bash scripts/install-debian13.sh --help` for usage.
-
-Open `https://<LXC-IP>/` from your trusted network. The browser warns about the self-signed certificate until you trust it. Installation paths:
-
-| Path | Purpose |
+| Local path | Purpose |
 |---|---|
-| `/opt/vsm-toolbox` | Symlink to the active application release |
-| `/opt/vsm-toolbox-releases/` | Root-owned application releases retained for recovery |
-| `/var/lib/vsm-toolbox/vsm.sqlite3` | Persistent local database, owned by `vsm` |
-| `/etc/systemd/system/vsm-toolbox.service` | Service definition |
-| `/var/backups/vsm-toolbox/` | Root-only database backups made before reinstalls/updates |
+| `%ProgramFiles%\VSMToolbox` | Installed application, stable service host, `service.json` |
+| `%ProgramData%\VSMToolbox\vsm.sqlite3` | Accounts and all shared application data |
+| `%ProgramData%\VSMToolbox\updates` | Downloaded releases, activation records, local backups |
+| `%ProgramData%\VSMToolbox\service.log` | Rotating service lifecycle/error log |
+| `%ProgramData%\VSMToolbox\application.log` | Web process output; archive periodically while stopped |
 
-Run the same installer again to update or reinstall. It preserves the database, backs it up before changing the running application, installs code in a new release directory, and switches the active symlink. If startup fails it restores the previous application and service state; database backups remain available, but the database is not automatically reverted. Package installations are not rolled back. Old code releases and backups are retained; review disk usage periodically.
+The installer restricts the data directory to Administrators, SYSTEM and LocalService, and gives LocalService read/execute access to installed code. `-InstallDirectory` and `-DataDirectory` accept alternate absolute local paths. Keep data on a local fixed disk, outside the application directory and outside cloud-synchronized folders. Nothing uploads application data to an external service. Diagram layout preferences remain in each user's browser, as before. Optional Admin application updates only download code from GitHub.
 
-The installer refuses to overwrite an existing `/opt/vsm-toolbox` installation that it did not create. To migrate the earlier manual installation, stop `vsm-toolbox`, back up `/var/lib/vsm-toolbox/vsm.sqlite3`, and move the old `/opt/vsm-toolbox` directory to a safe archive path before running the installer. The existing `vsm` account must be non-root and belong only to its private `vsm` group. Other systemd drop-ins are preserved; the installer manages its own `https.conf` drop-in. Incompatible custom overrides can cause the health check to fail.
-
-The installer starts the unprivileged update supervisor, which manages the web process.
-
-Diagnose startup with `systemctl status vsm-toolbox` and `journalctl -u vsm-toolbox`. The installer configures Nginx HTTPS on the main IPv4 address at port 443, redirects port 80, and keeps the application on loopback port 8080. It does not modify your firewall. No privileged LXC features or Docker nesting are needed.
-
-## Automatic startup after reboot
-
-For the primary Debian 13 LXC installation, the installer enables `vsm-toolbox.service` for `multi-user.target` and verifies that it is enabled before reporting success. The supervisor and application start automatically when the LXC boots, using the existing database and any activated web update. The service also restarts automatically if its supervisor exits, with a five-second retry delay. Local startup does not require GitHub connectivity.
-
-To enable startup for an existing installation or inspect the setting, run inside the LXC:
-
-```sh
-systemctl enable --now vsm-toolbox.service
-systemctl is-enabled vsm-toolbox.service
-systemctl status vsm-toolbox.service
-# After a normal reboot:
-journalctl -b -u vsm-toolbox.service
-curl --fail http://127.0.0.1:8080/api/health
+```powershell
+Get-Service VSMToolbox
+Stop-Service VSMToolbox
+Start-Service VSMToolbox
+Restart-Service VSMToolbox
+Invoke-RestMethod http://localhost:8080/api/health
 ```
 
-The LXC host must also start the container itself after a physical host reboot. For Proxmox, enable **Start at boot** for the container (or run `pct set <CTID> -onboot 1` on the Proxmox host). For other LXC hosts, enable the equivalent container autostart option. The application installer runs inside the container and cannot configure its host.
+For an installer/service-engine upgrade: stop the service, keep an external backup of the entire data directory, run `scripts/uninstall-windows.ps1`, archive the old installation directory, then install the new checkout with the same data directory. Existing database contents and backups are retained. A stored `updates/active.json` intentionally keeps the selected web release; archive that file while stopped if deliberately selecting the new bundled application. Never discard data to resolve an upgrade problem. Moving an existing database from another system requires copying it while the old server is stopped (including its SQLite journal files if present), then verifying the new installation before retiring the old one. Existing updates and full-code backups may contain platform-specific older code; keep them for recovery on their original platform.
 
-For Docker, Compose specifies `restart: always`. After running `docker compose up -d --build` once, Docker restores the existing container after its daemon starts; the named volume preserves accounts, data, and web updates. On a Debian Docker host, enable the daemon with `systemctl enable --now docker.service`. A manual container stop suppresses restarts until it is started again or the daemon restarts; `docker compose down` removes the container and requires `docker compose up -d` to recreate it. The container host's own boot policy remains a host setting.
+Uninstall the service and its managed firewall rule from an elevated PowerShell:
+
+```powershell
+.\scripts\uninstall-windows.ps1
+```
+
+Uninstallation preserves Python, installed application files, all data, and backups. Remove archived program files manually only after checking your backups. Service failures appear in Windows Event Viewer and the local logs. Check Python availability/permissions and whether another process owns port 8080 if startup fails.
 
 ## Local accounts and permissions
 
@@ -120,7 +101,7 @@ Usernames are case-insensitive and contain 3–64 letters, numbers, dots, unders
 
 Sessions last up to 12 hours and use opaque HttpOnly, SameSite=Strict cookies. Password, username or role changes revoke that account's sessions; removal immediately revokes access. Sign-in attempts are limited to ten failures per client IP per five-minute window. Application mutations require both an authenticated session and its CSRF token; read-only controls are also enforced by the API.
 
-Use a trusted private network and HTTPS when carrying credentials beyond the local machine. TLS is provided by your reverse proxy. When serving exclusively over HTTPS, set `VSM_COOKIE_SECURE=1` in the service environment or Docker configuration so browsers only send session cookies over HTTPS. The application does not trust forwarding headers to change cookie security automatically. Keep the Python HTTP service behind your private-network boundary or reverse proxy.
+The Windows service provides HTTP on port 8080. Restrict access to trusted clients through Windows Firewall. HTTP carries credentials and content without transport encryption. No external identity provider or data service is required.
 
 ## Updates from the Administrator menu
 
@@ -128,20 +109,11 @@ Open **Administrator → Application updates**, select **Check for updates**, th
 
 The supervisor checks the GitHub commit, downloads that exact revision over verified HTTPS, validates the supported update manifest and Python syntax, stops the web process, and creates a self-contained, integrity-checked application-and-database backup before switching code. Failure to create the backup cancels installation. It starts the new application, checks its revision and health, and revokes existing sessions after success. Sign in again after installation. If startup fails, it reconstructs the previous application **and database from the backup archive**, even when the original code directory is missing. A persistent recovery record also allows the supervisor to recover an interrupted installation on its next start. Writes pause during installation; checking and downloading leave the application available.
 
-Update code, activation state and backups live under `updates/` beside the database (`/var/lib/vsm-toolbox/updates` in LXC; `/data/updates` in Docker). Retain this directory along with the database. Applied code and activation state survive service/container restarts and container recreation with the same data volume. No root access, Docker socket, package manager, or privileged container is used for web updates. Old releases and backups are retained; monitor storage usage and keep external backups as well.
+Update code, activation state and backups live in `%ProgramData%\VSMToolbox\updates` beside the database. Retain this directory with the database; activation survives service restarts. Old releases and backups are retained; monitor storage and keep external backups.
 
-GitHub access to `api.github.com` and `codeload.github.com` is required for checking/downloading updates. Normal local use does not need these destinations. Public repositories use anonymous GitHub access by default. For a private repository or higher API rate limits, optionally configure `VSM_GITHUB_TOKEN` with repository contents read permission before starting the service. In LXC, systemd reads optional settings from `/etc/default/vsm-toolbox` (keep it root-owned with mode `0600`); Compose forwards this variable from its host environment. The token is used only on the initial GitHub API request, never exposed in the UI or API and never forwarded to redirected download hosts. Rate limits, access denials and network failures are reported on the update page without changing the installed application. Releases that require a different Python version, dependencies or update protocol are rejected and require the Debian installer or a new Docker image. The updater engine and base OS/image are maintained through the installer/image; web updates replace the application code and assets.
+GitHub access to `api.github.com` and `codeload.github.com` is required only for checking/downloading updates from `CoxkeLamagra/VSM-Toolbox-Win/main`. Normal local use stays offline. Public repositories use anonymous access. For private repositories, an administrator may configure `VSM_GITHUB_TOKEN` in the service process environment and restart it; never store tokens in the checkout or browser. The token is sent only to GitHub API requests and never forwarded to redirected hosts. Incompatible runtime/dependency changes require a Windows service-engine upgrade.
 
-**One-time upgrade from v0.1.0:** install this version using the updated Debian installer, or rebuild/recreate the Docker container once. That enables the supervisor and Admin menu. Subsequent compatible application updates need only the web UI. A deliberate installer rerun clears the previous web-update activation and selects the newly installed code. Docker retains web-update activation in its volume; to deliberately replace it with the image's bundled code, stop the container, archive `/data/updates/active.json`, then recreate it with the selected image. Back up the database before any downgrade.
-
-## Docker alternative
-
-```sh
-docker compose up -d --build
-docker compose exec vsm python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/api/health').read().decode())"
-```
-
-The named `vsm-data` volume persists the database. Compose publishes on host loopback by default; use a private-network binding or a reverse proxy if remote access is needed. Do not remove the volume when updating. The image runs as UID 10001; bind-mounted data directories must be writable by that UID.
+Service-engine upgrades use the Windows maintenance procedure above. Compatible application updates use the Admin interface.
 
 ## API
 
@@ -194,11 +166,11 @@ Open **Administrator → Backups & restore**. Only Admin accounts can list or do
 
 A successful restore revokes sessions. Sign in using an account and password contained in the restored backup; newer accounts and data are replaced by the selected snapshot. Full backups contain executable application code and local account hashes: restore only trusted backups and protect downloaded files. Checksums detect corruption, not maliciously modified archives. The service remains unprivileged throughout.
 
-Archives are retained under `/var/lib/vsm-toolbox/updates/backups` in LXC or `/data/updates/backups` in Docker. Files use mode `0600` and the directory uses `0700`. No automatic retention deletion is applied; use selective cleanup to manage disk usage. Installer-created, root-owned database backups under `/var/backups/vsm-toolbox` are separate and are not deleted by the web interface. Backups do not include the base OS, systemd/Compose settings, external TLS certificates, environment secrets, browser-only diagram layouts, or other backup archives.
+Archives are retained under `%ProgramData%\VSMToolbox\updates\backups` with the data directory ACL. No automatic retention deletion is applied. Backups exclude Python, service registration/settings, environment secrets, browser-only layouts, logs, and other backup archives.
 
 Every UI update which proceeds to installation first creates a full **pre-update** snapshot. Download/validation failures leave the current application running; backup failures prevent code activation. Failed activation, and recovery after an interrupted activation, restore code and data from the snapshot. For both updates and restores, the recovery record remains until the new application passes its health check. This protects data even if the previous source directory has been removed.
 
-**Upgrade existing supervisors once:** rerun this version's Debian installer or rebuild/recreate the Docker container to install the enhanced supervisor. New backup controls and UI installation requests reject an older supervisor that cannot guarantee a full application backup. A web-only application update does not replace the long-running supervisor engine. Subsequent compatible updates and backup operations use the Admin interface.
+Install the current Windows service engine using the maintenance procedure above. Web-only updates do not replace the running supervisor. Maintenance controls reject engines that lack the required backup capability.
 
 Additional API routes:
 
@@ -222,8 +194,8 @@ SQLite's backup API remains available for external database-only backup jobs. Th
 ```sh
 python3 - <<'PY'
 import sqlite3
-with sqlite3.connect('/var/lib/vsm-toolbox/vsm.sqlite3') as source:
-    with sqlite3.connect('/var/backups/vsm-toolbox.sqlite3') as target:
+with sqlite3.connect('C:/ProgramData/VSMToolbox/vsm.sqlite3') as source:
+    with sqlite3.connect('C:/ProgramData/VSMToolbox/manual-backup.sqlite3') as target:
         source.backup(target)
 PY
 ```
@@ -269,7 +241,7 @@ See [Architecture and refactor notes](docs/architecture.md) for the current resp
 
 The updater previously fetched `/commits/main` to identify the newest revision. GitHub includes changed-file patches in that response, so a large commit could exceed the 100,000-byte metadata limit before the application archive was downloaded. The updater now reads the compact `/git/ref/heads/main` reference and validates its commit SHA. Application archive and extracted-size limits remain in place.
 
-For an installation affected by this error, rerun the current Debian installer (which preserves the database) or rebuild/recreate the Docker container with its existing data volume. This loads the fixed supervisor engine; a web-only application update does not replace the already-running supervisor. The failed revision lookup leaves the installed application and database unchanged.
+Install the current Windows service engine using the maintenance procedure above. Web-only updates do not replace the running supervisor. Maintenance controls reject engines that lack the required backup capability.
 
 ### PCF framework
 
@@ -347,7 +319,7 @@ The action requires typing **DELETE ALL BUSINESS DATA** and accepting an additio
 
 The application restarts briefly during clearing, and the UI polls until it returns. Retained records are not deleted and database identifiers are not deliberately reset. This is a logical content reset, not secure erasure; backup archives still contain the previous business data.
 
-**Enable the updated supervisor once:** rerun this version's Debian installer or rebuild/recreate the Docker container using its existing data volume. Web-only updates do not replace the running supervisor. The UI and API reject clearing when the engine lacks the new capability, rather than attempting deletion without a guaranteed backup.
+Install the current Windows service engine using the maintenance procedure above. Web-only updates do not replace the running supervisor. Maintenance controls reject engines that lack the required backup capability.
 
 API: Admin-only `GET /api/maintenance` reports operation status and capability. `POST /api/maintenance/clear-data` requires an Admin session, CSRF token, and exactly `{"confirmation":"DELETE ALL BUSINESS DATA"}`; it queues the backup-first supervisor operation and returns HTTP 202. Normal writes pause while the clear runs. The shared maintenance queue prevents simultaneous update, backup, restore, cleanup, or clear operations.
 
@@ -405,35 +377,6 @@ Task labels wrap to the measured box width; gateway/event names sit outside thei
 The local viewer supports BPMN 2.0 tasks, events, gateways, subprocess nodes, sequence flows, and message flows. It preserves available BPMN DI node positions and flow waypoints; missing node positions use a basic grid layout. Pools, lanes, extension graphics, and event-specific symbols are not drawn, and nested subprocess contents appear together. Files are limited to 256 KiB, 500 supported nodes, and 2,000 flows. DTDs and entity declarations are rejected. Imported XML is stored in the environment's local database and included in backups; it is never executed as a workflow.
 
 
-### Protected deployment after the security fixes
-
-Rerun the latest Debian installer to configure automatic HTTPS:
-
-```sh
-sudo bash scripts/install-debian13.sh
-# For a multi-interface server, explicitly choose an assigned IPv4 address:
-sudo bash scripts/install-debian13.sh --https-ip 192.168.1.50
-```
-
-The installer installs Nginx, OpenSSL, and iproute2; detects the source IPv4 address of the default route; and generates a self-signed RSA certificate with that IP in its Subject Alternative Name. Open **`https://<LXC-IP>/`**, without `:8080`. HTTP port 80 redirects to HTTPS. Allow ports 443 and optionally 80 through your existing firewall. No firewall rules are changed automatically.
-
-Browsers show a warning until you trust the self-signed certificate. Verify its SHA-256 fingerprint through a trusted channel before accepting it or installing it in your device's certificate store:
-
-```sh
-sudo openssl x509 -in /etc/vsm-toolbox/tls/certificate.pem -noout -fingerprint -sha256
-```
-
-The public certificate is `/etc/vsm-toolbox/tls/certificate.pem`; the private key is root-only at `/etc/vsm-toolbox/tls/private-key.pem`. **Never distribute the private key.** A valid certificate/key matching the current IP is reused on reruns. The installer generates a replacement if the IP changes, the key does not match, or less than 30 days of validity remain. Certificates last 365 days: rerun the installer before expiry and after an IP change, and trust the replacement certificate on clients. Use a static IP or DHCP reservation. This does not install an automatic renewal timer.
-
-The managed Nginx site is `/etc/nginx/conf.d/vsm-toolbox-https.conf`. The systemd drop-in `/etc/systemd/system/vsm-toolbox.service.d/https.conf` loads `/etc/vsm-toolbox/https.env` after the existing environment file, forcing `VSM_HOST=127.0.0.1`, `VSM_PORT=8080`, and `VSM_COOKIE_SECURE=1`. Other existing environment settings, including tokens, remain intact. Direct remote HTTP access to port 8080 is intentionally disabled. Both services are enabled at boot. UI application updates cannot configure HTTPS; rerunning the installer is required once.
-
-The installer backs up the managed files before activation, runs `nginx -t`, checks backend health, verifies HTTPS with the generated certificate as its trust anchor, and checks the redirect. On failure it restores previous managed files and application/service activation. Other Nginx sites are retained; an unmanaged file occupying the managed site path is rejected. Existing servers on ports 80/443 may require resolving their listener conflict. Debian package installations remain installed after a failed application setup.
-
-For a publicly or internally trusted certificate instead, the separate `deploy/nginx-vsm-toolbox.conf` remains an example for manually managed hostname-based TLS. Avoid rerunning the automatic self-signed setup over a manual proxy deployment without reviewing its managed site and certificate paths. For Docker, keep Compose's loopback-only port publication and configure the proxy on the host using that example; automatic self-signed provisioning here targets Debian LXC.
-
-The application caps HTTP workers at 32, idle socket waits at 15 seconds, and each backend connection at 120 seconds, including uploads and downloads. Large transfers must complete within that deadline. Login failures use an ASCII-case-insensitive account/source key (ten failures per five-minute window). A broader source failure counter returns 429 for further failed guesses after 100 failures, while valid unrelated accounts can still sign in. Failed attempts continue to count toward their own account limit even when the broader counter is exhausted. Expired records are removed and storage is capped at 10,000 entries. No forwarded client-IP header is trusted; configure additional abuse controls at your trusted proxy.
-
-
 ### Value-add ratings
 
 Value streams and individual delivery steps each have independent **Customer Value Add (CVA)** and **Business Value Add (BVA)** classifications: **3 - High**, **2 - Medium**, **1 - Low**, or **Not rated**. Set or clear them in the stream/step edit forms. Ratings appear on stream cards, stream details, delivery-flow cards, and diagram step cards. Stream ratings are entered directly, rather than calculated from step ratings. Existing records remain unrated. Environment Admins/Editors can edit ratings; Viewers can inspect them.
@@ -458,14 +401,6 @@ These are estimates from the mapped sequential steps, not timestamp measurements
 
 API stream fields: `takt_available_minutes` and `takt_demand` accept finite positive numbers or `null`; `takt_period` accepts `shift`, `day`, `week`, or `month` (default `day`). Omitted inputs preserve existing values. The calculated cycle/lead values derive from the existing step work/wait times rather than being stored as independent, potentially stale values.
 
-## Modular application transition (delivery protocol 2)
+## Runtime and service updates
 
-The backend is now split into the `vsm/` package, and the browser loads native ES modules from `web/lib/` and `web/features/`. **This transition requires the matching full installer or a rebuilt Docker image; older UI update engines cannot install it.** They reject its delivery protocol before replacing the active application. Keep an external backup before reinstalling. Use the new installer rather than an older cached script, and hard-refresh the browser after upgrading if it retained old assets.
-
-For Debian LXC, rerun the installer from the modular revision, using the existing data directory. It stages every runtime module, performs schema/health checks, preserves the database, and configures the existing self-signed HTTPS setup. Use `--https-ip` for an explicit assigned address. An older release such as `v1.0.0` must use its own matching installer; the modular installer requires `vsm/runtime.py`.
-
-For Docker, stop the container and retain the data volume/backups. If `updates/active.json` exists in that volume, archive/rename it while stopped to select the new image's bundled code, then rebuild and recreate the container. Do not delete the database or volume. A stored web-update activation intentionally takes precedence over image code.
-
-New backups contain every declared module. The new supervisor also accepts the exact legacy six-file backup profile and can restore it; an older supervisor cannot restore modular backups. After a legacy-code restore, the running new supervisor still owns recovery. Runtime filenames are constrained and bounded; arbitrary archive paths are not extracted. See `docs/architecture.md` for module responsibilities and the delivery contract.
-
-No Python packages, Node service, JavaScript build step, or external database are introduced. `python3 app.py` and `python3 updater.py` remain the entry commands, run from a complete checkout/installation. The backend's database configuration now lives in `vsm.storage`; deployment configuration continues to use `VSM_DATABASE`.
+The modular backend (`vsm/`) and native browser modules (`web/`) retain delivery protocol 2. `update-manifest.json` declares the application payload. The Windows service host is installed separately and remains stable across web updates. Web updates do not replace the running supervisor or service registration; use the Windows maintenance procedure above when those components change. Old exact-profile backups remain readable, but restoring code from before Windows support may require recovery on its original platform.

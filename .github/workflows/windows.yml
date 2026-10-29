@@ -1,0 +1,39 @@
+name: Windows application and service
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Backend regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Frontend regression tests
+        run: npm run test:frontend
+      - name: Install, restart and remove Windows service
+        shell: powershell
+        run: |
+          $python = (Get-Command python).Source
+          .\scripts\install-windows.ps1 -Python $python
+          try {
+            $health = Invoke-RestMethod http://127.0.0.1:8080/api/health
+            if ($health.status -ne 'ok') { throw 'Service health failed' }
+            $body = @{username='ci-admin';password='temporary-ci-password-123'} | ConvertTo-Json
+            Invoke-RestMethod http://127.0.0.1:8080/api/auth/register -Method Post -ContentType application/json -Body $body
+            Stop-Service VSMToolbox
+            (Get-Service VSMToolbox).WaitForStatus('Stopped', '00:00:30')
+            Start-Service VSMToolbox
+            Start-Sleep -Seconds 3
+            $health = Invoke-RestMethod http://127.0.0.1:8080/api/health
+            if ($health.status -ne 'ok') { throw 'Restart health failed' }
+            $login = Invoke-RestMethod http://127.0.0.1:8080/api/auth/login -Method Post -ContentType application/json -Body $body
+            if ($login.user.username -ne 'ci-admin') { throw 'Account did not survive restart' }
+          } finally {
+            .\scripts\uninstall-windows.ps1
+          }
+          if (-not (Test-Path "$env:ProgramData\VSMToolbox\vsm.sqlite3")) { throw 'Uninstall deleted data' }

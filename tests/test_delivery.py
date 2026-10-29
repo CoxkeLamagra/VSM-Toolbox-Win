@@ -23,7 +23,7 @@ class DeliveryTest(unittest.TestCase):
         manifest = json.loads((updater.ROOT / 'update-manifest.json').read_text())
         self.assertEqual(set(release_files(manifest)), set(FILES))
         disk = {
-            str(p.relative_to(updater.ROOT))
+            p.relative_to(updater.ROOT).as_posix()
             for directory in ('vsm', 'web')
             for p in (updater.ROOT / directory).rglob('*')
             if p.is_file() and p.suffix in ('.py', '.js', '.css', '.html')

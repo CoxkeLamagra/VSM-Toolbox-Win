@@ -48,13 +48,13 @@ class BackupTest(test_updater.UpdaterTest):
         self.assertTrue(self.supervisor.healthy(timeout=10))
 
     def test_manual_backup_contains_code_database_and_checksums(self):
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("INSERT INTO settings(key,value) VALUES ('branding',?)", (json.dumps({**app.BRANDING_DEFAULTS, 'name':'Backed-up brand'}),))
         source=self.manual()
         metadata=updater.validate_backup(source)
         self.assertEqual(metadata['reason'],'manual')
         target, _ = updater.unpack_backup(source)
-        with sqlite3.connect(target/'database.sqlite3') as db:
+        with updater.database(target/'database.sqlite3') as db:
             self.assertEqual(json.loads(db.execute("SELECT value FROM settings WHERE key='branding'").fetchone()[0])['name'], 'Backed-up brand')
         with zipfile.ZipFile(source) as archive:
             self.assertEqual(set(archive.namelist()),{*updater.BACKUP_FILES,'backup.json'})
@@ -63,50 +63,50 @@ class BackupTest(test_updater.UpdaterTest):
 
     def test_bpmn_xml_survives_restore(self):
         xml = '<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"><process id="p"><task id="t" name="Restore me"/></process></definitions>'
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute('INSERT INTO processes(name,bpmn_xml) VALUES (?,?)', ('Imported', xml))
         source = self.manual()
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute('DELETE FROM processes')
         self.supervisor.maintenance({'action': 'restore', 'id': source.name})
         self.assertEqual(updater.status()['state'], 'succeeded')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute("SELECT bpmn_xml FROM processes WHERE name='Imported'").fetchone()[0], xml)
 
     def test_tag_catalog_and_assignments_survive_restore(self):
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("INSERT INTO tag_categories(id,name) VALUES (1,'Services')")
             db.execute("INSERT INTO tags(id,name,color,category_id) VALUES (1,'Critical','#336699',1)")
             db.execute("INSERT INTO streams_tags SELECT id,1 FROM streams")
         source = self.manual()
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute('DELETE FROM streams_tags')
             db.execute('DELETE FROM tags')
         self.supervisor.maintenance({'action':'restore','id':source.name})
         self.assertEqual(updater.status()['state'],'succeeded',updater.status())
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT name,color FROM tags').fetchone(),('Critical','#336699'))
             self.assertEqual(db.execute('SELECT count(*) FROM streams_tags').fetchone()[0],1)
             self.assertEqual(db.execute('SELECT name FROM tag_categories').fetchone()[0],'Services')
 
     def test_pcf_hierarchy_and_stream_links_survive_restore(self):
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("INSERT INTO pcf_entries(id,name,entry_type,number) VALUES (1,'IT Management','Category',1)")
             db.execute("INSERT INTO pcf_entries(id,name,entry_type,parent_id,number) VALUES (2,'Fault to Restoration','Process Group',1,1)")
             db.execute('INSERT INTO stream_pcf SELECT id,2 FROM streams')
         source=self.manual()
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute('DELETE FROM stream_pcf')
             db.execute('DELETE FROM pcf_entries WHERE id=2')
             db.execute('DELETE FROM pcf_entries WHERE id=1')
         self.supervisor.maintenance({'action':'restore','id':source.name})
         self.assertEqual(updater.status()['state'],'succeeded',updater.status())
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT parent_id FROM pcf_entries WHERE id=2').fetchone()[0],1)
             self.assertEqual(db.execute('SELECT pcf_id FROM stream_pcf').fetchone()[0],2)
 
     def test_multiple_environments_and_memberships_survive_restore(self):
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("INSERT INTO environment_members VALUES (1,1,'Admin')")
             db.execute("INSERT INTO environments(id,name,created_by,created_at) VALUES (2,'Second environment',1,1)")
             db.execute("INSERT INTO environment_members VALUES (2,1,'Admin')")
@@ -118,10 +118,10 @@ class BackupTest(test_updater.UpdaterTest):
             db.execute("INSERT INTO tags(id,name,environment_id) VALUES (2,'Critical',2)")
         source=self.manual()
         updater.clear_business_data(self.db)
-        with sqlite3.connect(self.db) as db:db.execute("UPDATE environments SET name='Changed' WHERE id=2")
+        with updater.database(self.db) as db:db.execute("UPDATE environments SET name='Changed' WHERE id=2")
         self.supervisor.maintenance({'action':'restore','id':source.name})
         self.assertEqual(updater.status()['state'],'succeeded',updater.status())
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT name FROM environments WHERE id=2').fetchone()[0],'Second environment')
             self.assertEqual(db.execute('SELECT count(*) FROM environment_members').fetchone()[0],2)
             self.assertEqual(db.execute('SELECT name FROM streams WHERE environment_id=2').fetchone()[0],'Second service')
@@ -130,18 +130,18 @@ class BackupTest(test_updater.UpdaterTest):
 
     def test_local_restore_creates_safety_backup_and_restores_accounts_data(self):
         source=self.manual()
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             db.execute("UPDATE streams SET name='Changed after backup'")
             db.execute("UPDATE users SET username='changed-admin'")
         self.supervisor.maintenance({'action':'restore','id':source.name})
         self.assertEqual(updater.status()['state'],'succeeded',updater.status())
         self.assertEqual(self.stream_name(),'Original service')
-        with sqlite3.connect(self.db) as db:
+        with updater.database(self.db) as db:
             self.assertEqual(db.execute('SELECT username FROM users').fetchone()[0],'admin')
             self.assertEqual(db.execute('SELECT count(*) FROM sessions').fetchone()[0],0)
         safety=Path(updater.status()['backup'])
         target,metadata=updater.unpack_backup(safety)
-        with sqlite3.connect(target/'database.sqlite3') as db:
+        with updater.database(target/'database.sqlite3') as db:
             self.assertEqual(db.execute('SELECT name FROM streams').fetchone()[0],'Changed after backup')
         self.assertEqual(metadata['reason'],'pre-restore')
         self.assertTrue(self.supervisor.healthy(timeout=10))
@@ -196,7 +196,7 @@ class BackupTest(test_updater.UpdaterTest):
         source=self.manual()
         previous=dict(self.supervisor.active)
         self.supervisor.stop()
-        with sqlite3.connect(self.db) as db: db.execute("UPDATE streams SET name='Interrupted operation'")
+        with updater.database(self.db) as db: db.execute("UPDATE streams SET name='Interrupted operation'")
         updater.atomic_json(updater.directory()/'pending.json',{'backup':str(source),'previous':previous,'bundle':True})
         self.supervisor=updater.Supervisor()
         self.supervisor.recover()

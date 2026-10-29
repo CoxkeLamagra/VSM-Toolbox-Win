@@ -1326,7 +1326,7 @@ function applyBranding() {
       : '<b aria-hidden="true">◈</b>'
   }<span>${esc(brandSettings.name)}</span>`;
   $('.aside-bottom').innerHTML =
-    `<div class="footer-details">${esc(brandSettings.tagline)}<br><span>● Data stays on your server</span></div><a class="app-version" href="https://github.com/CoxkeLamagra/VSM-Toolbox" target="_blank" rel="noopener noreferrer" title="${esc('GitHub repository · Revision: ' + (session.revision || 'local'))}">v${esc(session.version || 'development')}</a>`;
+    `<div class="footer-details">${esc(brandSettings.tagline)}<br><span>● Data stays on your server</span></div><a class="app-version" href="https://github.com/CoxkeLamagra/VSM-Toolbox-Win" target="_blank" rel="noopener noreferrer" title="${esc('GitHub repository · Revision: ' + (session.revision || 'local'))}">v${esc(session.version || 'development')}</a>`;
 }
 let maintenanceState = { operation: {}, supported: false };
 function renderDataManagement() {
@@ -1335,7 +1335,7 @@ function renderDataManagement() {
   const disabled = busy || !operation.available || !maintenanceState.supported;
   $('#breadcrumb').textContent = 'Administrator / Data management';
   $('#content').innerHTML =
-    `<div class="eyebrow">ADMINISTRATOR</div><div class="title-row"><div><h1>Data management</h1><p>Clear business content after creating a local safety backup.</p></div></div><section class="data-danger-panel"><h2>Clear all business data</h2><p class="data-warning" role="note"><strong>Warning: this removes content in ALL environments: value streams, delivery steps / process flows, processes, PCF entries, and their links.</strong> Accounts, branding, tag definitions, tag categories, and existing backups remain.</p><p>A full local application and database backup is required before deletion. If backup creation fails, nothing is deleted. The application restarts briefly; failed startup restores the backup. You can restore the saved backup from Backups & restore.</p><p role="status">${esc(operation.message || 'Ready')}</p>${operation.backup ? `<p>Latest operation backup: <code>${esc(operation.backup)}</code></p>` : ''}${!maintenanceState.supported ? '<p class="hint">Rerun the updated Debian installer or rebuild the Docker image once to enable safe data clearing.</p>' : ''}<form id="clearDataForm"><label>Type DELETE ALL BUSINESS DATA to confirm<input name="confirmation" aria-label="Confirmation text" autocomplete="off" required pattern="DELETE ALL BUSINESS DATA" ${disabled ? 'disabled' : ''}></label><button class="danger" type="submit" ${disabled ? 'disabled' : ''}>Create backup and clear all data</button></form></section>`;
+    `<div class="eyebrow">ADMINISTRATOR</div><div class="title-row"><div><h1>Data management</h1><p>Clear business content after creating a local safety backup.</p></div></div><section class="data-danger-panel"><h2>Clear all business data</h2><p class="data-warning" role="note"><strong>Warning: this removes content in ALL environments: value streams, delivery steps / process flows, processes, PCF entries, and their links.</strong> Accounts, branding, tag definitions, tag categories, and existing backups remain.</p><p>A full local application and database backup is required before deletion. If backup creation fails, nothing is deleted. The application restarts briefly; failed startup restores the backup. You can restore the saved backup from Backups & restore.</p><p role="status">${esc(operation.message || 'Ready')}</p>${operation.backup ? `<p>Latest operation backup: <code>${esc(operation.backup)}</code></p>` : ''}${!maintenanceState.supported ? '<p class="hint">Rerun the Windows service installer to enable safe data clearing.</p>' : ''}<form id="clearDataForm"><label>Type DELETE ALL BUSINESS DATA to confirm<input name="confirmation" aria-label="Confirmation text" autocomplete="off" required pattern="DELETE ALL BUSINESS DATA" ${disabled ? 'disabled' : ''}></label><button class="danger" type="submit" ${disabled ? 'disabled' : ''}>Create backup and clear all data</button></form></section>`;
   $('#clearDataForm').onsubmit = async (event) => {
     event.preventDefault();
     if (
@@ -1685,9 +1685,9 @@ function renderUpdates() {
       connectivity is required only when checking or installing updates.
     </p>
     ${updateStatus.available && updateStatus.backup_protocol !== 1
-      ? '<p>Install the updated supervisor using the Debian installer or Docker image to guarantee full application backups before updating.</p>'
+      ? '<p>Install the updated supervisor using the Windows service installer to guarantee full application backups before updating.</p>'
       : ''}${!updateStatus.available
-      ? '<p>Web updates require the update supervisor. Install this version using the Debian installer or rebuild the Docker image once to enable them.</p>'
+      ? '<p>Web updates require the update supervisor. Install this version using the Windows service installer once to enable them.</p>'
       : ''}
   `;
   if (busy) pollMaintenance();
@@ -1728,7 +1728,7 @@ function renderBackups() {
         <button id="uploadBackup" ${disabled ? 'disabled' : ''}>Upload and restore</button>
       </div>
       ${!backupState.supported
-        ? '<p>Enable the updated supervisor with the Debian installer or Docker image before using backup management.</p>'
+        ? '<p>Enable the updated supervisor with the Windows service installer before using backup management.</p>'
         : ''}
     </div>
     <div class="section-row">

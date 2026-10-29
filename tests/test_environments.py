@@ -1,3 +1,4 @@
+import updater
 import sqlite3
 import app
 import test_api
@@ -351,7 +352,7 @@ class EnvironmentTest(test_api.ApiTest):
         from unittest import mock
 
         legacy = Path(self.temp.name) / 'legacy.sqlite3'
-        with sqlite3.connect(legacy) as conn:
+        with updater.database(legacy) as conn:
             conn.executescript(
                 '''
                 CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT UNIQUE,password_hash TEXT,role TEXT);
@@ -401,7 +402,7 @@ class EnvironmentTest(test_api.ApiTest):
                 )
                 self.assertEqual(list(conn.execute('PRAGMA foreign_key_check')), [])
             # Match an older supervisor deleting sessions without PRAGMA foreign_keys.
-            with sqlite3.connect(legacy) as conn:
+            with updater.database(legacy) as conn:
                 conn.execute('DELETE FROM sessions')
             with app.connect() as conn:
                 self.assertEqual(

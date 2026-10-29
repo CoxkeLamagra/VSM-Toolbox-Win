@@ -511,7 +511,7 @@ class Handler(BaseHTTPRequestHandler):
         if os.environ.get('VSM_BACKUP_PROTOCOL') != '1' or not updater.status()['available']:
             raise ApiError(
                 409,
-                'Restart with the updated installer or Docker image to enable full application backups.',
+                'Restart with the Windows service installer to enable full application backups.',
             )
 
     def upload_backup(self):
@@ -647,7 +647,7 @@ class Handler(BaseHTTPRequestHandler):
                     ):
                         raise ApiError(
                             409,
-                            'Rerun the Debian installer or rebuild the Docker image to enable safe data clearing.',
+                            'Rerun the Windows service installer to enable safe data clearing.',
                         )
                     if data != {'confirmation': 'DELETE ALL BUSINESS DATA'}:
                         raise ValueError(

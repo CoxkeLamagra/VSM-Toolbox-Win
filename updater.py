@@ -1,6 +1,6 @@
-"""Unprivileged application supervisor and fixed-source GitHub updater (Linux)."""
+"""Application supervisor and fixed-source GitHub updater for Windows and development."""
 
-import fcntl
+from contextlib import contextmanager
 import hashlib
 import gzip
 import io
@@ -21,7 +21,7 @@ import uuid
 import zipfile
 import tempfile
 
-REPOSITORY = 'CoxkeLamagra/VSM-Toolbox'
+REPOSITORY = 'CoxkeLamagra/VSM-Toolbox-Win'
 from vsm.runtime import FILES, LEGACY_FILES, MAX_RUNTIME_FILES, release_files
 
 BUSY = (
@@ -36,6 +36,51 @@ BUSY = (
     'clearing',
 )
 ROOT = Path(__file__).resolve().parent
+
+
+@contextmanager
+def database(path, **options):
+    """Commit/rollback and release file handles before Windows restore/cleanup."""
+    connection = sqlite3.connect(path, **options)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
+def sync_directory(path):
+    # Windows does not support opening directories with os.open/fsync.
+    # Files are flushed before atomic replacement on both platforms.
+    if os.name == 'nt':
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def supervisor_lock(path, blocking=False):
+    with path.open('a+b') as lock:
+        if os.name == 'nt':
+            import msvcrt
+            lock.seek(0, os.SEEK_END)
+            if not lock.tell():
+                lock.write(b'\0')
+                lock.flush()
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def directory():
@@ -60,11 +105,7 @@ def atomic_json(path, data):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, path)
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        sync_directory(path.parent)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -87,12 +128,11 @@ def request(action, **payload):
         raise ValueError('Unknown update action')
     base = directory()
     base.mkdir(parents=True, exist_ok=True)
-    with (base / 'request.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with supervisor_lock(base / 'request.lock', blocking=True):
         current = status()
         if not current['available']:
             raise RuntimeError(
-                'The update supervisor is not running. Reinstall using the current installer or rebuild the Docker image.'
+                'The update supervisor is not running. Start or reinstall the Windows service.'
             )
         if current['state'] in BUSY or (base / 'request.json').exists():
             raise RuntimeError('An update operation is already in progress')
@@ -199,7 +239,7 @@ def prepare_release(revision, target):
         raise ValueError('The update requires a different Python runtime')
     for filename in files:
         if filename.endswith('.py'):
-            compile((target / filename).read_text(), str(target / filename), 'exec')
+            compile((target / filename).read_bytes(), str(target / filename), 'exec')
     (target / 'REVISION').write_text(revision + '\n')
     return hashlib.sha256(data).hexdigest()
 
@@ -207,10 +247,10 @@ def prepare_release(revision, target):
 def backup_database(db, backup):
     backup.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(backup.parent, 0o700)
-    with sqlite3.connect('file:' + str(db) + '?mode=ro', uri=True) as source:
+    with database(Path(db).resolve().as_uri() + '?mode=ro', uri=True) as source:
         if source.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise ValueError('Database integrity check failed; update cancelled')
-        with sqlite3.connect(backup) as target:
+        with database(backup) as target:
             source.backup(target)
     os.chmod(backup, 0o600)
 
@@ -222,16 +262,12 @@ def restore_database(db, backup):
     replacement = db.with_name(db.name + '.restore')
     shutil.copyfile(backup, replacement)
     os.chmod(replacement, 0o600)
-    with replacement.open('rb') as handle:
+    with replacement.open('r+b') as handle:
         os.fsync(handle.fileno())
     os.replace(replacement, db)
     for suffix in ('-wal', '-shm', '-journal'):
         Path(str(db) + suffix).unlink(missing_ok=True)
-    descriptor = os.open(db.parent, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    sync_directory(db.parent)
 
 
 BACKUP_LIMIT = 128 * 1024 * 1024
@@ -317,7 +353,7 @@ def validate_backup(path, destination=None):
 
 
 def validate_backup_database(path):
-    with sqlite3.connect('file:' + str(path) + '?mode=ro', uri=True) as conn:
+    with database(Path(path).resolve().as_uri() + '?mode=ro', uri=True) as conn:
         if conn.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
             raise ValueError('Backup database failed integrity validation')
         expected = {
@@ -389,14 +425,10 @@ def create_backup(active, db, reason):
             )
         validate_backup(package)
         os.chmod(package, 0o600)
-        with package.open('rb') as handle:
+        with package.open('r+b') as handle:
             os.fsync(handle.fileno())
         os.replace(package, final)
-        descriptor = os.open(base, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        sync_directory(base)
     return final
 
 
@@ -476,7 +508,7 @@ def delete_backups(identifiers):
 
 def clear_business_data(db):
     """Clear business records and their links, retaining accounts and settings."""
-    with sqlite3.connect(db) as conn:
+    with database(db) as conn:
         conn.execute('PRAGMA foreign_keys=ON')
         conn.execute('BEGIN IMMEDIATE')
         counts = {
@@ -505,6 +537,8 @@ class Supervisor:
         self.initial = {'path': str(ROOT), 'revision': initial_revision}
         self.active = read_json(self.base / 'active.json', self.initial)
         self.child = None
+        self.output = None
+        self.python_executable = sys.executable
         self.stopping = threading.Event()
 
     def report(self, state, message, **extra):
@@ -534,9 +568,11 @@ class Supervisor:
             'VSM_REVISION': self.active['revision'],
         }
         self.child = subprocess.Popen(
-            [sys.executable, str(Path(self.active['path']) / 'app.py')],
+            [self.python_executable, str(Path(self.active['path']) / 'app.py')],
             cwd=self.active['path'],
             env=environment,
+            stdout=self.output,
+            stderr=subprocess.STDOUT if self.output is not None else None,
         )
 
     def stop(self):
@@ -652,7 +688,7 @@ class Supervisor:
             if not self.healthy():
                 raise RuntimeError('Updated application failed its health check')
             # Existing sessions must not survive code or schema changes.
-            with sqlite3.connect(self.db) as conn:
+            with database(self.db) as conn:
                 conn.execute('PRAGMA foreign_keys=ON')
                 conn.execute('DELETE FROM sessions')
             atomic_json(self.base / 'active.json', self.active)
@@ -746,7 +782,7 @@ class Supervisor:
             restore_database(self.db, target / 'database.sqlite3')
             (target / 'database.sqlite3').unlink()
             self.active = {'path': str(target), 'revision': metadata['revision']}
-            with sqlite3.connect(self.db) as conn:
+            with database(self.db) as conn:
                 conn.execute('PRAGMA foreign_keys=ON')
                 conn.execute('DELETE FROM sessions')
             self.report('restarting', 'Starting the restored application…', backup=str(safety))
@@ -776,8 +812,7 @@ class Supervisor:
             self.stopping.wait(2)
 
     def run(self):
-        with (self.base / 'supervisor.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with supervisor_lock(self.base / 'supervisor.lock'):
             self.recover()
             # Requests left by a stopped instance are never silently applied on startup.
             (self.base / 'request.json').unlink(missing_ok=True)

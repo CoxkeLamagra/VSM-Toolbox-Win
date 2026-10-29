@@ -65,7 +65,7 @@ class UpdaterTest(unittest.TestCase):
         return mock.patch('updater.download',side_effect=response)
 
     def stream_name(self):
-        with sqlite3.connect(self.db) as conn:
+        with updater.database(self.db) as conn:
             return conn.execute('SELECT name FROM streams').fetchone()[0]
 
     def test_update_and_restart_keeps_code_data_and_revokes_sessions(self):
@@ -75,12 +75,13 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(self.supervisor.active['revision'],'a'*40)
         self.assertEqual(self.stream_name(),'Original service')
         self.assertFalse((self.base/'escaped').exists())
-        with sqlite3.connect(self.db) as conn:
+        with updater.database(self.db) as conn:
             self.assertEqual(conn.execute('SELECT count(*) FROM users').fetchone()[0],1)
             self.assertEqual(conn.execute('SELECT count(*) FROM sessions').fetchone()[0],0)
         backup=Path(updater.status()['backup'])
         self.assertTrue(backup.exists())
-        self.assertEqual(backup.stat().st_mode & 0o777,0o600)
+        if os.name != 'nt':  # Windows permissions are controlled by the installation ACL.
+            self.assertEqual(backup.stat().st_mode & 0o777,0o600)
         self.supervisor.stop()
         self.supervisor=updater.Supervisor()
         self.assertEqual(self.supervisor.active['revision'],'a'*40)
@@ -94,7 +95,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(self.supervisor.active['revision'],'1'*40)
         self.assertEqual(self.stream_name(),'Original service')
         self.assertTrue(self.supervisor.healthy(timeout=10))
-        with sqlite3.connect(self.db) as conn:
+        with updater.database(self.db) as conn:
             self.assertEqual(conn.execute('SELECT count(*) FROM sessions').fetchone()[0],1)
 
     def test_validation_failure_does_not_stop_current_application(self):
@@ -117,7 +118,7 @@ class UpdaterTest(unittest.TestCase):
         backup=self.base/'updates'/'backups'/'recover.sqlite3'
         updater.backup_database(self.db,backup)
         previous=dict(self.supervisor.active)
-        with sqlite3.connect(self.db) as conn:
+        with updater.database(self.db) as conn:
             conn.execute("UPDATE streams SET name='Interrupted migration'")
         updater.atomic_json(self.base/'updates'/'pending.json',{'previous':previous,'backup':str(backup)})
         self.supervisor=updater.Supervisor()
